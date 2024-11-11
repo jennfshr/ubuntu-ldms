@@ -1,0 +1,72 @@
+name: Package OVIS-LDMS Ubuntu x86
+
+# Controls when the workflow will run 
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch: 
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "build"
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-20.04
+    env:      
+      DOCKER_REGISTRY: docker.io
+      DOCKER_IMAGE: jkgreen76/ldms-ubuntu_20.04_x86
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      DOCKER_TARGET_PLATFORM: 'linux/x86'
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - name: Checkout code
+      uses: actions/checkout@v4
+        
+    - name: Set up Docker Buildx      
+      uses: docker/setup-buildx-action@v3    
+      with:        
+        version: latest  
+
+    - name: Prepare
+      if: success()
+      id: prepare
+      run: |
+        echo ::set-output name=docker_image::${DOCKER_REGISTRY}/${DOCKER_IMAGE}
+        echo ::set-output name=version::${GITHUB_RUN_NUMBER}
+        echo ::set-output name=docker_platform::${DOCKER_TARGET_PLATFORM}
+
+    - name: Docker Login
+      if: success()
+      run: |
+        echo "${DOCKER_PASSWORD}" | docker login ${DOCKER_REGISTRY} --username "${DOCKER_USERNAME}" --password-stdin
+
+    - name: Build Debian Package
+      if: success()
+      run: |
+        docker buildx build \
+        --platform ${{ steps.prepare.outputs.docker_platform }} \
+        --tag ${{ steps.prepare.outputs.docker_image }} \
+        --provenance false \
+        --sbom false \
+        --file ./Dockerfile \
+        --output "type=image,push=true" .
+            
+    - name: Stage artifacts to bindmount
+      run: |
+        mkdir -p ldms-slingshot-sampler
+        sudo chmod -R 777 $(pwd)/ldms-slingshot-sampler
+        docker run -i \
+        -v $(pwd)/ldms-v4.4.4:/ldms-v4.4.4:rw ${DOCKER_IMAGE} \
+        cp /ovis-ldms-ubuntu-package /ldms-ubuntu-package/.
+        
+    - name: list directory contents of ldms
+      continue-on-error: true
+      run: |
+        ls -al ldms-v4.4.4.
